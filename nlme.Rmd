@@ -36,7 +36,6 @@ if (!require("plyr")) {install.packages("plyr"); require("plyr")}
 #### mlm packages ####
 if (!require("nlme")) {install.packages("nlme"); require("nlme")} # mixed effects models
 if (!require("psychometric")) {install.packages("psychometric"); require("psychometric")} # iccs
-if (!require("EMAtools")) {install.packages("EMAtools"); require("EMAtools")}  # effect sizes
 if (!require("r2mlm")) {install.packages("r2mlm"); require("r2mlm")} # pseudo-r squared  
 
 dat <- read.csv("mlm_dat.csv")
@@ -67,26 +66,26 @@ dat <- dat %>% group_by(ID) %>%
   ungroup()
 ```
 
-# btwn and within
+## btwn and within
 
-## trait vars
+### trait vars
 ```{r}
 dat_means <- dat %>% group_by(ID) %>%
-summarise(across(energetic:avoid_people, mean, na.rm=TRUE))
+summarise_at(vars(energetic:avoid_people), mean, na.rm=TRUE)
 
 colnames(dat_means)[c(2:ncol(dat_means))] <- paste(colnames(dat_means)[c(2:ncol(dat_means))],"trait",sep="_")
 
 dat <- merge(dat, dat_means, by="ID")
 ```
 
-## center trait vars
+### center trait vars
 ```{r}
 dat <- dat %>%
   mutate_at(vars(ends_with("trait")),  list(mod = ~ scale(., center=TRUE, scale=FALSE))) %>%
   rename_at(vars(ends_with("_mod")), list(~ paste(gsub("_mod", "_cent", .))))
 ```
 
-## create state vars
+### create state vars
 ```{r}
 # there's definitely a more elegant solution, but here we are
 xx = colnames(dat[c(which(colnames(dat)=="energetic"):which(colnames(dat)=="avoid_people"))])
@@ -122,7 +121,7 @@ dat <- dat %>%
   mutate(avoid_people_state = avoid_people - avoid_people_trait) 
 ```
 
-## lag
+### lag
 ```{r}
 namesoriginal <- names(dat[c(which(colnames(dat)=="energetic"):which(colnames(dat)=="avoid_people"))]) # save original names in a vector
 nameslag <- paste(names(dat[c(which(colnames(dat)=="energetic"):which(colnames(dat)=="avoid_people"))]), "_lag", sep="") # save new names in a vector
@@ -149,9 +148,24 @@ rm(list, lagdf, namesoriginal, nameslag, i)
 write.csv(dat, "mlm_dat_processed.csv", row.names = FALSE)
 ```
 
-if you start here with preproccesed dat
+# if you start here with preproccesed dat
 ```{r}
 rm(list=ls())
+#### my almost always packages ####
+if (!require("psych")) {install.packages("psych"); require("psych")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+
+#### data wrangling packages ####
+if (!require("purrr")) {install.packages("purrr"); require("purrr")}
+if (!require("sjmisc")) {install.packages("sjmisc"); require("sjmisc")}
+if (!require("DataCombine")) {install.packages("DataCombine"); require("DataCombine")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("plyr")) {install.packages("plyr"); require("plyr")} 
+
+#### mlm packages ####
+if (!require("nlme")) {install.packages("nlme"); require("nlme")} # mixed effects models
+if (!require("psychometric")) {install.packages("psychometric"); require("psychometric")} # iccs
+if (!require("r2mlm")) {install.packages("r2mlm"); require("r2mlm")} # pseudo-r squared  
 dat <- read.csv("mlm_dat_processed.csv")
 ```
 
@@ -214,7 +228,7 @@ avoid_anx2 = lme(avoid_people_lag ~ worried_trait + worried_state + beepconsec,
             na.action = "na.omit")
 
 summary(avoid_anx2)
-intervals(avoid_anx2)
+# intervals(avoid_anx2)
 # error: "Non-positive definite approximate variance-covariance." too complex. removing beep-consecutive as a random effect
 
 avoid_anx2 = lme(avoid_people_lag ~ worried_trait + worried_state + beepconsec,
