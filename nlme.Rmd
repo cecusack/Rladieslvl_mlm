@@ -47,8 +47,8 @@ length(unique(dat$ID)) # 79
 
 ## night lags
 
-Here, I:
-1. **adding an empty row** after the last beep of the day to account for night lags    
+Here, I:    
+1. **add an empty row** after the last beep of the day to account for night lags    
 2. **fill in the ID and date** from the row above    
 3. **remove the last empty row** for each participant (e.g., remove the empty row btween ID_001 and ID_003)   
 4. **renumber beeps**
@@ -67,6 +67,8 @@ dat <- dat %>% group_by(ID) %>%
 ```
 
 ## btwn and within
+
+In these code chunks, I create "trait" like variables for the mean. Then, I center them. I create "state" like variables that subtract their trait-like variable from their momentary value. Then, I lag variables (shit down one row.)
 
 ### trait vars
 ```{r}
@@ -258,7 +260,7 @@ plot(avoid_anx2)
 
 # plots
 
-```{r}
+```{r warning=FALSE}
 # plotting avoid people by time
 dat %>% 
   filter(beepconsec<200) %>% 
