@@ -1,0 +1,94 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-07-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+- data from Aaron Fisher https://osf.io/nt37e/
+
+# libs dat
+```{r message=FALSE, warning=FALSE}
+library(nlme)
+library(psych)
+library(tidyverse)
+library(purrr)
+library(sjmisc)
+
+load("/Users/clairecusack/Dropbox/Aaron Fisher/Idiographic Workshop SRP 2022/Workshop_Data.RData")
+```
+
+```{r}
+pullnames <- grep("^dat([0-9]{3})", names(.GlobalEnv), value = TRUE)
+
+list <- list()
+list <- do.call("list",mget(pullnames))
+
+# fix col names to match
+# use 244 and 215 as examples for mgsub
+
+for(i in seq_along(list)){
+  list[[i]]$ID <- rep(pullnames[i],nrow(list[[i]])) # add ID column
+  list[[i]] <- list[[i]][ , c("ID", names(list[[i]])[names(list[[i]]) != "ID"])] # move ID column first
+  list[[i]]$ID <- gsub("dat", "ID_", list[[i]]$ID) # replace dat with ID in ID column name
+}
+
+dat <- bind_rows(list, .id = "remove")
+dat <- dat[,-c(grep("remove", colnames(dat)), grep("Survey.Creation.Date", colnames(dat)):ncol(dat))]
+
+names(dat)
+# View(dat)
+env = ls(.GlobalEnv)
+rm(list=env[!grepl('^dat$', env)])
+
+dat_copy <- dat
+```
+
+# date time day beeps
+```{r}
+dat <- dat %>% arrange(ID, start)
+dat <- dat[-which(colnames(dat)=="finish")]
+
+# test <- dat
+# test$start <- gsub("(\\d{4}\\-\\d{2}\\-\\d{2} \\d{2}\\:\\d{2}\\:\\d{2}).*", "\\1", test$start)
+
+dat <- dat[!grepl("ID_126|ID_206|ID_244", dat$ID),]
+
+dat=dat %>% separate(start, c("date","time"), sep = " ", fill = "right") 
+dat$date=as.Date(dat$date, "%m/%d/%Y")
+
+dat <- dat %>% arrange(ID, date, time)
+
+list <- lapply(split(dat, dat$ID), data.frame, stringsAsFactors = FALSE)
+
+for(i in seq_along(list)){
+  list[[i]]$dayvar <- floor(as.numeric(difftime(list[[i]]$date, list[[i]]$date[1], units="days")))+1
+}
+
+list <- map(list, ~ .x %>% 
+              group_by(date) %>% 
+              mutate(beepvar = seq(1:n())) %>% 
+              ungroup()) 
+
+dat <- do.call("rbind", list)
+
+dat <- dat %>% relocate(dayvar, .after=time) %>% relocate(beepvar, .after=dayvar)
+
+dat <- dat %>% group_by(ID) %>% 
+    mutate(beepconsec = seq(1:n())) %>% 
+    ungroup() %>% 
+    relocate(beepconsec, .after=beepvar) 
+
+describe(dat$beepconsec)
+# dat %>% filter(beepconsec==213)
+# dat %>% filter(ID=="ID_113")
+```
+
+```{r}
+write.csv(dat, "mlm_dat.csv", row.names = FALSE)
+```
+
+

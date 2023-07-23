@@ -1,0 +1,279 @@
+---
+title: "nlme_rladies"
+author: "CCusack"
+date: "2023-07-23"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 6
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    theme: cosmo
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+- data from Aaron Fisher https://osf.io/nt37e/
+
+# libs dat
+
+```{r message=FALSE, warning=FALSE}
+#### my almost always packages ####
+if (!require("psych")) {install.packages("psych"); require("psych")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+
+#### data wrangling packages ####
+if (!require("purrr")) {install.packages("purrr"); require("purrr")}
+if (!require("sjmisc")) {install.packages("sjmisc"); require("sjmisc")}
+if (!require("DataCombine")) {install.packages("DataCombine"); require("DataCombine")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("plyr")) {install.packages("plyr"); require("plyr")} 
+
+#### mlm packages ####
+if (!require("nlme")) {install.packages("nlme"); require("nlme")} # mixed effects models
+if (!require("psychometric")) {install.packages("psychometric"); require("psychometric")} # iccs
+if (!require("EMAtools")) {install.packages("EMAtools"); require("EMAtools")}  # effect sizes
+if (!require("r2mlm")) {install.packages("r2mlm"); require("r2mlm")} # pseudo-r squared  
+
+dat <- read.csv("mlm_dat.csv")
+dim(dat) # 10217 x 32
+length(unique(dat$ID)) # 79
+```
+
+# data management
+
+## night lags
+
+Here, I:
+1. **adding an empty row** after the last beep of the day to account for night lags    
+2. **fill in the ID and date** from the row above    
+3. **remove the last empty row** for each participant (e.g., remove the empty row btween ID_001 and ID_003)   
+4. **renumber beeps**
+
+```{r}
+dat <- dat %>% 
+  group_split(ID, dayvar) %>% 
+  map_dfr(~ add_row(.x, .after = Inf))
+
+dat <- dat %>% tidyr::fill(ID, date)
+dat <- dat %>% group_by(ID) %>% slice(-n())
+
+dat <- dat %>% group_by(ID) %>% 
+  dplyr::mutate(beepconsec = seq(1:n())) %>% 
+  ungroup()
+```
+
+# btwn and within
+
+## trait vars
+```{r}
+dat_means <- dat %>% group_by(ID) %>%
+summarise(across(energetic:avoid_people, mean, na.rm=TRUE))
+
+colnames(dat_means)[c(2:ncol(dat_means))] <- paste(colnames(dat_means)[c(2:ncol(dat_means))],"trait",sep="_")
+
+dat <- merge(dat, dat_means, by="ID")
+```
+
+## center trait vars
+```{r}
+dat <- dat %>%
+  mutate_at(vars(ends_with("trait")),  list(mod = ~ scale(., center=TRUE, scale=FALSE))) %>%
+  rename_at(vars(ends_with("_mod")), list(~ paste(gsub("_mod", "_cent", .))))
+```
+
+## create state vars
+```{r}
+# there's definitely a more elegant solution, but here we are
+xx = colnames(dat[c(which(colnames(dat)=="energetic"):which(colnames(dat)=="avoid_people"))])
+xx <- paste(xx, "state", sep = "_")
+dat[xx] <- NA
+
+dat <- dat %>% 
+  mutate(energetic_state = energetic - energetic_trait) %>% 
+  mutate(enthusiastic_state = enthusiastic - enthusiastic_trait) %>% 
+  mutate(content_state = content - content_trait) %>% 
+  mutate(irritable_state = irritable - irritable_trait) %>% 
+  mutate(restless_state = restless - restless_trait) %>% 
+  mutate(worried_state = worried - worried_trait) %>% 
+  mutate(guilty_state = guilty - guilty_trait) %>% 
+  mutate(afraid_state = afraid - afraid_trait) %>% 
+  mutate(anhedonia_state = anhedonia - anhedonia_trait) %>% 
+  mutate(angry_state = angry - angry_trait) %>% 
+  mutate(hopeless_state = hopeless - hopeless_trait) %>% 
+  mutate(down_state = down - down_trait) %>% 
+  mutate(positive_state = positive - positive_trait) %>% 
+  mutate(fatigue_state = fatigue - fatigue_trait) %>% 
+  mutate(tension_state = tension - tension_trait) %>% 
+  mutate(concentrate_state = concentrate - concentrate_trait) %>% 
+  mutate(accepted_state = accepted - accepted_trait) %>% 
+  mutate(threatened_state = threatened - threatened_trait) %>% 
+  mutate(ruminate_state = ruminate - ruminate_trait) %>% 
+  mutate(avoid_act_state = avoid_act - avoid_act_trait) %>% 
+  mutate(reassure_state = reassure - reassure_trait) %>% 
+  mutate(procrast_state = procrast - procrast_trait) %>% 
+  mutate(hours_state = hours - hours_trait) %>% 
+  mutate(difficult_state = difficult - difficult_trait) %>% 
+  mutate(unsatisfy_state = unsatisfy - unsatisfy_trait) %>% 
+  mutate(avoid_people_state = avoid_people - avoid_people_trait) 
+```
+
+## lag
+```{r}
+namesoriginal <- names(dat[c(which(colnames(dat)=="energetic"):which(colnames(dat)=="avoid_people"))]) # save original names in a vector
+nameslag <- paste(names(dat[c(which(colnames(dat)=="energetic"):which(colnames(dat)=="avoid_people"))]), "_lag", sep="") # save new names in a vector
+
+list <- split(dat, dat$ID) # split df by id
+
+list  <- list %>%  # shift all list elements with columns in name original
+  map(~shift(.x[namesoriginal],  n = 1, fill=NA, type="lag"))
+
+for(i in seq_along(list)){ # make each list element a dataframe
+  list[[i]] <- do.call("cbind", list[[i]])
+}
+
+lagdf <- ldply(list, data.frame) # list as dataframe
+names(lagdf) <- c("ID", nameslag) # rename vars
+lagdf <- lagdf[-1] # remove ID col
+
+dat <- cbind(dat, lagdf) # add lagged vars to dataframe
+
+# clean up environment
+rm(list, lagdf, namesoriginal, nameslag, i)
+
+# save df
+write.csv(dat, "mlm_dat_processed.csv", row.names = FALSE)
+```
+
+if you start here with preproccesed dat
+```{r}
+rm(list=ls())
+dat <- read.csv("mlm_dat_processed.csv")
+```
+
+
+# Random-intercept only
+```{r}
+#### ICC ####
+ICC1.lme(avoid_people_lag, ID, data=dat) # 0.49 variance is at the btwn person level
+
+avoid_RE = lme(avoid_people_lag ~ 1,
+            random =~ 1|ID,
+            data=dat,
+            correlation= corCAR1(form=~beepconsec),
+            method="ML", 
+            na.action = na.exclude)
+summary(avoid_RE)
+# random effect (within person diff) = 18.97; between-person diffs = 19.57
+intervals(avoid_RE)
+VarCorr(avoid_RE)
+# intercept = 359.8428
+```
+
+# add fixed effects
+
+add in anxiety as both within-person (`anxiety_trait`) and between-person (`anxiety_state`) predictor
+
+Is avoiding people a function of general and momentary worry?
+
+```{r}
+avoid_anx1 = lme(avoid_people_lag ~ worried_trait + worried_state +beepconsec,
+            random =~ 1|ID,
+            data=dat,
+            correlation= corCAR1(form=~beepconsec),
+            method="ML", # maximum likelihood estimation
+            na.action = "na.omit")
+summary(avoid_anx1)
+# fixed effects: the between person effect is much stronger than within person effect. For each unit increase in momentary worry, avoiding people increases by 0.06. For each unit increase in avg worry, avoiding people increases by 0.55. 
+intervals(avoid_anx1)
+VarCorr(avoid_anx1)
+
+r2mlm(avoid_anx1, bargraph = TRUE)
+# fvm represents the total outcome variance explained by predictors through fixed slopes and random slope variation/covariation and between-person random intercept variation (e.g., total R2 measure; R2total) 0.4903065
+# 2) v represents the proportion of outcome variance explained by predictors via random slope variation/covariation (e.g., within-person R2 measure; R2within); 0.00 
+# 3) f2 represents the proportion outcome variance explained by between-person variables fixed slopes (e.g., between-person R2 measure; R2between) .25
+
+qqnorm(avoid_anx1, ~ranef(., level=1))
+plot(avoid_anx1) # eh not great
+```
+
+# add random effect for within-person associations
+
+Let momentary worry vary across persons
+
+```{r}
+avoid_anx2 = lme(avoid_people_lag ~ worried_trait + worried_state + beepconsec,
+            random =~ 1 + beepconsec + worried_state|ID,
+            data=dat,
+            correlation= corCAR1(form=~beepconsec),
+            method="ML", 
+            na.action = "na.omit")
+
+summary(avoid_anx2)
+intervals(avoid_anx2)
+# error: "Non-positive definite approximate variance-covariance." too complex. removing beep-consecutive as a random effect
+
+avoid_anx2 = lme(avoid_people_lag ~ worried_trait + worried_state + beepconsec,
+            random =~ 1 + worried_state|ID,
+            data=dat,
+            correlation= corCAR1(form=~beepconsec),
+            method="ML", 
+            na.action = "na.omit")
+
+summary(avoid_anx2)
+# positive slope. pos correlation = .19 correlation btwn ind diff and the within person coupling. People w/ more people avoidance have a stronger association w/ avoidance and momentary worry
+intervals(avoid_anx2)
+VarCorr(avoid_anx2) 
+
+anova.lme(avoid_anx1, avoid_anx2) # avoid_anx2 has slightly lower AIC and BIC values
+
+r2mlm(avoid_anx2, bargraph = TRUE) 
+# fvm = 0.493176037
+# v = 0.01
+# f2 = 0.25
+
+# although anx2 had lower AIC and BIC values, the more parsimonious model (avoid_anx1) yields similar findings, so I would go with that one rather than 
+
+qqnorm(avoid_anx2, ~ranef(., level=1))
+plot(avoid_anx2)
+```
+
+# plots
+
+```{r}
+# plotting avoid people by time
+dat %>% 
+  filter(beepconsec<200) %>% 
+  ggplot(aes(beepconsec, avoid_people)) +
+  geom_smooth(method='loess', se=FALSE) + 
+  # geom_point(color='black',size=.1) +
+  labs(x = "Time", y = "Avoid People (0-100)") +
+  theme_classic() +
+  coord_cartesian(ylim=c(0,100))
+
+# observations w/in person
+dat %>%
+  filter(beepconsec<200) %>% 
+  ggplot(aes(x=beepconsec, y=avoid_people, group=ID, color=ID))+
+  geom_smooth(method = "loess", se=FALSE, size=.5)+
+  labs(x="Time", y="Avoid People (0-100)") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  coord_cartesian(ylim=c(0,100))
+
+# facet
+dat %>%
+  filter(beepconsec<200) %>% 
+  ggplot(aes(x=beepconsec, y=avoid_people, group=ID, color=ID))+
+  geom_smooth(method = "loess", se=FALSE, size=.5)+
+  labs(x="Time", y="Avoid People (0-100)") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  coord_cartesian(ylim=c(0,100)) +
+  facet_wrap(~ID)  # generally people stay high or stay low
+```
+
