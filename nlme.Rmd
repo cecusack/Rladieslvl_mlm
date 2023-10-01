@@ -41,6 +41,7 @@ if (!require("r2mlm")) {install.packages("r2mlm"); require("r2mlm")} # pseudo-r 
 dat <- read.csv("mlm_dat.csv")
 dim(dat) # 10217 x 32
 length(unique(dat$ID)) # 79
+
 ```
 
 # data management
@@ -131,7 +132,7 @@ nameslag <- paste(names(dat[c(which(colnames(dat)=="energetic"):which(colnames(d
 list <- split(dat, dat$ID) # split df by id
 
 list  <- list %>%  # shift all list elements with columns in name original
-  map(~shift(.x[namesoriginal],  n = 1, fill=NA, type="lag"))
+  map(~shift(.x[namesoriginal],  n = -1, fill=NA, type="lead"))
 
 for(i in seq_along(list)){ # make each list element a dataframe
   list[[i]] <- do.call("cbind", list[[i]])
@@ -171,50 +172,136 @@ if (!require("r2mlm")) {install.packages("r2mlm"); require("r2mlm")} # pseudo-r 
 dat <- read.csv("mlm_dat_processed.csv")
 ```
 
+# brief data overview
 
-# Random-intercept only
+We have 79 participants who completed an average of 129 surveys (*SD* = 16.67, Min = 103, Max = 213) across 55 days.
+
+```{r}
+head(dat)
+# note data are in long form. Each observation is it's own row. This form contrasts wide-format where each participant is it's own row and may have multiple time points as columns
+```
+
+Summary stats for study. For EMA studies, want to report participants and how many observations are within participants.
+
+```{r}
+# number of unique participants
+length(unique(dat$ID)) # 79
+
+dat %>% 
+  filter(!is.na(time)) %>%  # exclude time lag rows
+  group_by(ID) %>% # group by participant
+  tally() %>% # survey count by participant
+  summarise(meanobs = mean(n), median(n), sdobs=sd(n), minobs=min(n), maxobs=max(n)) 
+
+# Participants completed an average of 129 surveys (SD = 16.67). Minimum number of surveys = 103, maximum surveys = 213.
+
+describe(dat[c(which(colnames(dat)=="dayvar"), which(colnames(dat)=="beepvar"))]) # maximum of 55 days, max beep var is 5 but I know I added an empty row between last beep and first beep so actually 4 pings per day
+```
+
+## visualize variables
+
+before you model, it's good to have a sense of the shape of your data. I visualize histogram below. skimr::skimr also is good/easy for this purpose.
+```{r}
+dens_fun <- function(var, name) {
+  ggplot(dat, aes(x = var)) +
+    geom_histogram() +
+    theme_classic() +
+    labs(x = name,
+         title = name)
+}
+
+dat %>% 
+  dplyr::select(avoid_people, worried_trait, worried_state) %>% 
+  map2(.y = names(.),
+       ~ dens_fun(.x, .y)
+  )
+
+library(skimr)
+skim(dat[c(which(colnames(dat)=="avoid_people"), which(colnames(dat)=="worried_trait"), which(colnames(dat)=="worried_state"))])
+```
+
+
+# ICC
 ```{r}
 #### ICC ####
 ICC1.lme(avoid_people_lag, ID, data=dat) # 0.49 variance is at the btwn person level
+```
 
+# Random-intercept only
+
+```{r}
 avoid_RE = lme(avoid_people_lag ~ 1,
             random =~ 1|ID,
             data=dat,
-            correlation= corCAR1(form=~beepconsec),
             method="ML", 
             na.action = na.exclude)
+
 summary(avoid_RE)
-# random effect (within person diff) = 18.97; between-person diffs = 19.57
-intervals(avoid_RE)
-VarCorr(avoid_RE)
+# average avoidance score is 27.19
+# within-person effect is 19.03 (how much individuals vary from grand mean)
+# number of groups and observations, does it match what you expect?
+```
+
+### RE with AR(1) correlation structure
+```{r}
+avoid_RE1 = lme(avoid_people_lag ~ 1,
+            random =~ 1|ID,
+            data=dat,
+            correlation = corCAR1(form=~beepconsec), 
+            method="ML", 
+            na.action = na.exclude)
+summary(avoid_RE1)
+# the average avoidance score is 27.18 with an SD in individual scores being 2.15
+# random effect (within person diff) = 18.97 (how much individuals vary from fixed effect); 
+# between person diff 19.57 is how much individuals vary from each other
+intervals(avoid_RE1)
+# if CI contains zero, random effects null
+# VarCorr(avoid_RE)
 # intercept = 359.8428
+
+anova(avoid_RE, avoid_RE1) # here we see adding the AR1 correlation structure results in a better model fit
 ```
 
 # add fixed effects
 
-add in anxiety as both within-person (`anxiety_trait`) and between-person (`anxiety_state`) predictor
+add in anxiety as both within-person (`worried_trait`) and between-person (`worrired_state`) predictor
 
 Is avoiding people a function of general and momentary worry?
 
 ```{r}
-avoid_anx1 = lme(avoid_people_lag ~ worried_trait + worried_state +beepconsec,
+avoid_anx1 = lme(avoid_people_lag ~ worried_trait + worried_state,
             random =~ 1|ID,
             data=dat,
             correlation= corCAR1(form=~beepconsec),
             method="ML", # maximum likelihood estimation
             na.action = "na.omit")
 summary(avoid_anx1)
-# fixed effects: the between person effect is much stronger than within person effect. For each unit increase in momentary worry, avoiding people increases by 0.06. For each unit increase in avg worry, avoiding people increases by 0.55. 
-intervals(avoid_anx1)
-VarCorr(avoid_anx1)
+# fixed effects: the between person effect is much stronger than within person effect. 
+# For each unit increase in momentary worry, avoiding people increases by 0.06. For each unit increase in avg worry, avoiding people increases by 0.55.
+```
 
+## confidence intervals fixed effects
+```{r}
+intervals(avoid_anx1)
+```
+
+```{r}
+# VarCorr(avoid_anx1) # within-group variance and 
+# coef(avoid_anx1) # here we can see our fixed effects are constant and our intercepts vary by participant
+```
+## pseudo- r squared
+```{r}
 r2mlm(avoid_anx1, bargraph = TRUE)
 # fvm represents the total outcome variance explained by predictors through fixed slopes and random slope variation/covariation and between-person random intercept variation (e.g., total R2 measure; R2total) 0.4903065
 # 2) v represents the proportion of outcome variance explained by predictors via random slope variation/covariation (e.g., within-person R2 measure; R2within); 0.00 
 # 3) f2 represents the proportion outcome variance explained by between-person variables fixed slopes (e.g., between-person R2 measure; R2between) .25
+```
 
-qqnorm(avoid_anx1, ~ranef(., level=1))
-plot(avoid_anx1) # eh not great
+## assumptions
+```{r}
+qqnorm(residuals(avoid_anx1)) # normality of resid
+qqnorm(avoid_anx1, ~ranef(., level=1)) # normality of random effects
+plot(avoid_anx1) 
 ```
 
 # add random effect for within-person associations
@@ -222,18 +309,7 @@ plot(avoid_anx1) # eh not great
 Let momentary worry vary across persons
 
 ```{r}
-avoid_anx2 = lme(avoid_people_lag ~ worried_trait + worried_state + beepconsec,
-            random =~ 1 + beepconsec + worried_state|ID,
-            data=dat,
-            correlation= corCAR1(form=~beepconsec),
-            method="ML", 
-            na.action = "na.omit")
-
-summary(avoid_anx2)
-# intervals(avoid_anx2)
-# error: "Non-positive definite approximate variance-covariance." too complex. removing beep-consecutive as a random effect
-
-avoid_anx2 = lme(avoid_people_lag ~ worried_trait + worried_state + beepconsec,
+avoid_anx2 = lme(avoid_people_lag ~ worried_trait + worried_state,
             random =~ 1 + worried_state|ID,
             data=dat,
             correlation= corCAR1(form=~beepconsec),
@@ -242,51 +318,70 @@ avoid_anx2 = lme(avoid_people_lag ~ worried_trait + worried_state + beepconsec,
 
 summary(avoid_anx2)
 # positive slope. pos correlation = .19 correlation btwn ind diff and the within person coupling. People w/ more people avoidance have a stronger association w/ avoidance and momentary worry
+```
+
+## CIs
+```{r}
 intervals(avoid_anx2)
-VarCorr(avoid_anx2) 
+#VarCorr(avoid_anx2) 
+```
 
-anova.lme(avoid_anx1, avoid_anx2) # avoid_anx2 has slightly lower AIC and BIC values
-
+# compare mods
+```{r}
+anova.lme(avoid_anx1, avoid_anx2) # avoid_anx2 has lower AIC and BIC values. model 2 is a better fit than model 1, we should let the random slopes vary
+```
+##pseudo-rsquare
+```{r}
 r2mlm(avoid_anx2, bargraph = TRUE) 
 # fvm = 0.493176037
 # v = 0.01
 # f2 = 0.25
 
 # although anx2 had lower AIC and BIC values, the more parsimonious model (avoid_anx1) yields similar findings, so I would go with that one rather than 
+```
 
+## assumptions
+```{r}
+qqnorm(residuals(avoid_anx2))
 qqnorm(avoid_anx2, ~ranef(., level=1))
 plot(avoid_anx2)
 ```
 
 # plots
 
+## avoid people - worry trait
 ```{r warning=FALSE}
-# plotting avoid people by time
+# plotting avoid people by trait like worry
 dat %>% 
   filter(beepconsec<200) %>% 
-  ggplot(aes(beepconsec, avoid_people)) +
-  geom_smooth(method='loess', se=FALSE) + 
+  ggplot(aes(worried_trait, avoid_people)) +
+  geom_smooth(method='lm', se=TRUE) + 
   # geom_point(color='black',size=.1) +
-  labs(x = "Time", y = "Avoid People (0-100)") +
+  labs(x = "Trait Worry", y = "Avoid People (0-100)") +
   theme_classic() +
   coord_cartesian(ylim=c(0,100))
+```
 
-# observations w/in person
+## momentary worry and avoid
+```{r}
 dat %>%
   filter(beepconsec<200) %>% 
-  ggplot(aes(x=beepconsec, y=avoid_people, group=ID, color=ID))+
-  geom_smooth(method = "loess", se=FALSE, size=.5)+
-  labs(x="Time", y="Avoid People (0-100)") +
+  ggplot(aes(x=worried_state, y=avoid_people, group=ID, color=ID))+
+  geom_smooth(method = "lm", se=FALSE, size=.5)+ # toggle se TRUE
+  labs(x="Momentary Worry", y="Avoid People (0-100)") +
   theme_classic() +
   theme(legend.position = "none") +
   coord_cartesian(ylim=c(0,100))
+```
 
+## momentary worry avoid facet
+```{r}
 # facet
 dat %>%
   filter(beepconsec<200) %>% 
-  ggplot(aes(x=beepconsec, y=avoid_people, group=ID, color=ID))+
+  ggplot(aes(x=worried_state, y=avoid_people, group=ID, color=ID))+
   geom_smooth(method = "loess", se=FALSE, size=.5)+
-  labs(x="Time", y="Avoid People (0-100)") +
+  labs(x="Momentary Worry", y="Avoid People (0-100)") +
   theme_classic() +
   theme(legend.position = "none") +
   coord_cartesian(ylim=c(0,100)) +
