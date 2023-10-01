@@ -1,0 +1,113 @@
+---
+title: "mlm figure"
+output: html_document
+date: "2023-09-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# libs fake dat
+```{r}
+library(tidyverse)
+
+dat <- as.data.frame(matrix(nrow=10, ncol = 3))
+names(dat) <- c("group", "stress", "workload")
+dat[1] <- c(rep(1, 5), rep(2,5))
+dat[2] <- c(8, 7, 6, 8, 9,
+            4, 5, 4, 3, 5)
+dat[3] <- c(-2,-1, 0, 1, 2,
+            -2,-1, 0, 1, 2)
+
+dat$group <- factor(dat$group)
+```
+
+# plot without cluster
+```{r}
+dat %>% 
+  ggplot(aes(x=workload, y=stress)) +
+  geom_point() +
+  theme_classic()
+```
+
+
+# simple ols
+```{r}
+simpleols <- dat %>% 
+  ggplot(aes(x=workload, y=stress)) +
+  geom_point(size=3) +
+  geom_smooth(method="lm", se= FALSE) +
+  theme_classic()
+
+simpleols
+ggsave("simpleols.png", simpleols, height=4, width=6)
+```
+
+# color by group
+```{r}
+colbygroup = dat %>% 
+  ggplot(aes(x=workload, y=stress)) +
+  geom_point(aes(shape=group, color=group), size=3) +
+  geom_smooth(method="lm", se= FALSE) +
+  theme_classic()
+colbygroup
+ggsave("colbygroup.png", colbygroup, height=4, width=6)
+```
+
+
+# groups each with line
+
+```{r}
+linebygroup = dat %>% 
+  ggplot(aes(x=workload, y=stress, color=group)) +
+  geom_point(aes(shape=group, color=group), size=3) +
+  geom_smooth(method="lm", se= FALSE) +
+  theme_classic()
+
+linebygroup
+ggsave("linebygroup.png", linebygroup, height=4, width=6)
+```
+
+# groups with grand mean
+```{r}
+groupgrand <- dat %>% 
+  ggplot(aes(x=workload, y=stress)) +
+  geom_point(aes(shape=group, color=group), size=3) +
+  geom_smooth(method="lm", se= FALSE, aes(color=group)) +
+  geom_smooth(method="lm", se= FALSE, linetype="dashed") +
+  theme_classic() +
+  theme(legend.position = "bottom")
+
+groupgrand
+ggsave("linebygroupwithgrandmean.png", groupgrand, height=4.5, width=6.5)
+```
+
+
+# therapist plot
+```{r}
+dat2 <- as.data.frame(matrix(nrow=6, ncol=3))
+names(dat2) <- c("ID", "therapist", "depression")
+dat2[1] <- sprintf("ID_%d", seq(1:6))
+dat2[2] <- c(rep("A", 3), rep("B", 3))
+dat2[3] <- c(2.3,4.2, 2.7, 7.6, 7.8, 6.6)
+
+dat2$therapist <- as.factor(dat2$therapist)
+
+mean_dep <- dat2 %>% 
+  dplyr::group_by(therapist) %>% 
+        dplyr::summarise(meandep = mean(depression))
+
+meansplot <- dat2 %>% 
+  ggplot(aes(x = therapist, y=depression, color=therapist)) + 
+  geom_point(size=2.7) +
+  geom_hline(yintercept=mean(dat2$depression), linetype="dashed", size=.3) +
+  geom_errorbar(data=mean_dep, aes(x=therapist, ymin=meandep, ymax=meandep, color=therapist),
+             size=0.5, linetype = "solid", inherit.aes = F, width = .5) +
+  theme_classic(base_size = 20) +
+  coord_cartesian(ylim = c(0,10)) +
+  theme(legend.position = "none")
+
+ggsave("groupmeans.pdf", meansplot, width=6,height=4)
+```
+
