@@ -169,6 +169,7 @@ if (!require("plyr")) {install.packages("plyr"); require("plyr")}
 if (!require("nlme")) {install.packages("nlme"); require("nlme")} # mixed effects models
 if (!require("psychometric")) {install.packages("psychometric"); require("psychometric")} # iccs
 if (!require("r2mlm")) {install.packages("r2mlm"); require("r2mlm")} # pseudo-r squared  
+if (!require("insight")) {install.packages("insight"); require("insight")}
 dat <- read.csv("mlm_dat_processed.csv")
 ```
 
@@ -256,15 +257,13 @@ summary(avoid_RE1)
 # between person diff 19.57 is how much individuals vary from each other
 intervals(avoid_RE1)
 # if CI contains zero, random effects null
-# VarCorr(avoid_RE)
-# intercept = 359.8428
 
 anova(avoid_RE, avoid_RE1) # here we see adding the AR1 correlation structure results in a better model fit
 ```
 
 # add fixed effects
 
-add in anxiety as both within-person (`worried_trait`) and between-person (`worrired_state`) predictor
+add in worry as both between-person (`worried_trait`) and within-person (`worrired_state`) predictor
 
 Is avoiding people a function of general and momentary worry?
 
@@ -286,9 +285,9 @@ intervals(avoid_anx1)
 ```
 
 ```{r}
-# VarCorr(avoid_anx1) # within-group variance and 
 # coef(avoid_anx1) # here we can see our fixed effects are constant and our intercepts vary by participant
 ```
+
 ## pseudo- r squared
 ```{r}
 r2mlm(avoid_anx1, bargraph = TRUE)
@@ -323,21 +322,29 @@ summary(avoid_anx2)
 ## CIs
 ```{r}
 intervals(avoid_anx2)
-#VarCorr(avoid_anx2) 
+get_variance(avoid_anx2)
+# var fixed 179.2374 (variance attributed to FEs)
+# var intercept 176.0984 (between subject variance)
+# var random (mean variance of REs)
+# var resid 368.2388 (residual variance)
+# random slope variance .012
+# cor.slope_intercept 0.19 (relation btwn random slope and intercept)
+VarCorr(avoid_anx2) 
+# variance/sd estimates for random effects. corr is the relation among REs within the same level of grouping
 ```
 
 # compare mods
 ```{r}
 anova.lme(avoid_anx1, avoid_anx2) # avoid_anx2 has lower AIC and BIC values. model 2 is a better fit than model 1, we should let the random slopes vary
 ```
-##pseudo-rsquare
+
+## pseudo-rsquare
 ```{r}
 r2mlm(avoid_anx2, bargraph = TRUE) 
 # fvm = 0.493176037
 # v = 0.01
 # f2 = 0.25
 
-# although anx2 had lower AIC and BIC values, the more parsimonious model (avoid_anx1) yields similar findings, so I would go with that one rather than 
 ```
 
 ## assumptions
@@ -375,7 +382,7 @@ dat %>%
 ```
 
 ## momentary worry avoid facet
-```{r}
+```{r warning=FALSE}
 # facet
 dat %>%
   filter(beepconsec<200) %>% 
